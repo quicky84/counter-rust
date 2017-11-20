@@ -19,12 +19,12 @@ start server
 connect (there is no client yet)
 
 terminal 1 (a very long task)
-`echo 2 1000000000 | ncat 127.0.0.1 12345`
+```echo 2 1000000000 | ncat 127.0.0.1 12345```
 
 *then*
 
 terminal 2 (a quicker task)
-`echo 1 13300 | ncat 127.0.0.1 12345`
+```echo 1 13300 | ncat 127.0.0.1 12345```
 
 The responses will arrive in *the following order*
 Task `1` will report back first with the execution time,
