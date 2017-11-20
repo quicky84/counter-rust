@@ -17,7 +17,9 @@ impl Config {
     ///     args[3] - timeout for completion
     pub fn new(args: &[String]) -> Result<Config, &'static str> {
         if args.len() < 4 {
-            return Err("Not enough arguments: port n_kernels completion_timeout_secs");
+            return Err(
+                "Not enough arguments: port n_kernels completion_timeout_secs",
+            );
         }
 
         let port: u16 = match args[1].parse() {
@@ -25,12 +27,12 @@ impl Config {
             Err(_) => return Err("Port must be a positive integer"),
         };
 
-        let n_kernels: usize =  match args[2].parse() {
+        let n_kernels: usize = match args[2].parse() {
             Ok(value) => value,
             Err(_) => return Err("Number of tasks must be a positive integer"),
         };
 
-        let timeout: u64 =  match args[3].parse() {
+        let timeout: u64 = match args[3].parse() {
             Ok(value) => value,
             Err(_) => return Err("Completion timeout must be a positive integer"),
         };
@@ -55,7 +57,7 @@ mod tests {
                 String::from("8000"),
                 String::from("3"),
                 String::from("1"),
-            ].as_slice()
+            ].as_slice(),
         );
 
         let value = Config {
