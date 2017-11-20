@@ -131,12 +131,12 @@ impl<T: AsyncRead + AsyncWrite + 'static> ServerProto<T> for TaskProto {
     }
 }
 
-pub struct ComputingService {
+pub struct CountingService {
     pub thread_pool: CpuPool,
     pub timeout: u64,
 }
 
-impl Service for ComputingService {
+impl Service for CountingService {
     type Request = Request;
     type Response = Response;
 
@@ -191,7 +191,7 @@ fn main() {
     let server = TcpServer::new(TaskProto, addr);
 
     server.serve(move || {
-        Ok(ComputingService {
+        Ok(CountingService {
             thread_pool: thread_pool.clone(),
             timeout: config.timeout,
         })
