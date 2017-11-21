@@ -1,4 +1,3 @@
-// #![cfg_attr(feature="clippy", feature(plugin))]
 #![cfg_attr(feature = "dev", allow(unstable_features))]
 #![cfg_attr(feature = "dev", feature(plugin))]
 #![cfg_attr(feature = "dev", plugin(clippy))]
@@ -17,26 +16,29 @@ extern crate bytes;
 
 extern crate atoi;
 
-use tokio_proto::TcpServer;
-use futures_cpupool::CpuPool;
+extern crate num_cpus;
 
-use std::env;
-use std::process;
+use atoi::atoi;
+use bytes::BytesMut;
 use counter_server::Config;
 
-use std::net::SocketAddr;
-use std::net::{IpAddr, Ipv4Addr};
-
 use futures::Future;
-use tokio_service::Service;
+use futures_cpupool::CpuPool;
+use std::cmp;
+
+use std::env;
 
 use std::io;
-use bytes::BytesMut;
-use tokio_io::codec::{Encoder, Decoder, Framed};
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_proto::pipeline::ServerProto;
-use atoi::atoi;
+use std::net::{IpAddr, Ipv4Addr};
+
+use std::net::SocketAddr;
+use std::process;
 use std::time::{Duration, Instant};
+use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::codec::{Encoder, Decoder, Framed};
+use tokio_proto::TcpServer;
+use tokio_proto::pipeline::ServerProto;
+use tokio_service::Service;
 use tokio_timer::Timer;
 
 
@@ -55,48 +57,6 @@ pub struct Response {
     completion: Completion,
 }
 
-fn decode(buf: &mut BytesMut) -> io::Result<Option<Request>> {
-    // println!("Received: {:?}", buf);
-
-    // Expected input is `u32 u32\n`
-    let i = match buf.iter().position(|&b| b == b'\n') {
-        Some(i) => i,
-        _ => return Ok(None),
-    };
-
-    // read up the first `\n`
-    let sub_buf = buf.split_to(i);
-
-    // after the read-out, there is still `\n` belogning to "our" input which has to be removed
-    buf.split_to(1);
-
-    let i = match sub_buf.iter().position(|&b| b == b' ') {
-        Some(i) => i,
-        _ => return Ok(None),
-    };
-
-    let (id, difficulty) = (&sub_buf[..i], &sub_buf[i + 1..]);
-
-    let (id, difficulty) = match (atoi::<u32>(id), atoi::<u32>(difficulty)) {
-        (Some(id), Some(difficulty)) => (id, difficulty),
-        _ => return Ok(None),
-    };
-
-    println!("Parsed:\nid: {}\ndifficulty: {}", id, difficulty);
-
-    Ok(Some(Request { id, difficulty }))
-}
-
-fn encode(res: &Response, buf: &mut BytesMut) {
-    let msg = match res.completion {
-        Completion::Time(t) => format!("{} completed in {} milliseconds", res.id, t),
-        Completion::OutOfTime => format!("{} ran out of time", res.id),
-    };
-
-    buf.extend(msg.to_string().as_bytes());
-    buf.extend(b"\n");
-}
-
 pub struct TaskCodec;
 
 impl Decoder for TaskCodec {
@@ -104,7 +64,35 @@ impl Decoder for TaskCodec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Request>> {
-        decode(buf)
+        println!("Received: {:?}", buf);
+
+        // Expected input is `u32 u32\n`
+        let i = match buf.iter().position(|&b| b == b'\n') {
+            Some(i) => i,
+            _ => return Ok(None),
+        };
+
+        // read up the first `\n`
+        let sub_buf = buf.split_to(i);
+
+        // after the read-out, there is still `\n` belogning to "our" input which has to be removed
+        buf.split_to(1);
+
+        let i = match sub_buf.iter().position(|&b| b == b' ') {
+            Some(i) => i,
+            _ => return Ok(None),
+        };
+
+        let (id, difficulty) = (&sub_buf[..i], &sub_buf[i + 1..]);
+
+        let (id, difficulty) = match (atoi::<u32>(id), atoi::<u32>(difficulty)) {
+            (Some(id), Some(difficulty)) => (id, difficulty),
+            _ => return Ok(None),
+        };
+
+        println!("\tParsed:\n\tTask {}\n\tdifficulty: {}", id, difficulty);
+
+        Ok(Some(Request { id, difficulty }))
     }
 }
 
@@ -113,7 +101,15 @@ impl Encoder for TaskCodec {
     type Error = io::Error;
 
     fn encode(&mut self, res: Response, buf: &mut BytesMut) -> io::Result<()> {
-        encode(&res, buf);
+        let msg = match res.completion {
+            Completion::Time(t) => format!("Task {} completed in {} milliseconds", res.id, t),
+            Completion::OutOfTime => format!("{} ran out of time", res.id),
+        };
+
+        buf.extend(msg.as_bytes());
+        buf.extend(b"\r\n");
+        println!("Task {}: Response: {:?}", res.id, buf);
+
         Ok(())
     }
 }
@@ -154,7 +150,8 @@ impl Service for CountingService {
 
             let elapsed = now.elapsed();
 
-            let millisec = (elapsed.as_secs() * 1_000) + u64::from(elapsed.subsec_nanos() / 1_000_000);
+            let millisec = (elapsed.as_secs() * 1_000) +
+                u64::from(elapsed.subsec_nanos() / 1_000_000);
             let computation_time: Result<u64, ()> = Ok(millisec);
             computation_time
         });
@@ -168,6 +165,7 @@ impl Service for CountingService {
             });
 
         Box::new(timed_computation.map(move |completion| {
+            println!("Task {} completed", id);
             Response { id, completion }
         }))
     }
@@ -181,7 +179,8 @@ fn main() {
         process::exit(0);
     });
 
-    let thread_pool = CpuPool::new(config.n_kernels);
+    let cpus = cmp::min(num_cpus::get(), config.n_kernels);
+    let thread_pool = CpuPool::new(cpus);
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), config.port);
 
     if let IpAddr::V4(ip) = addr.ip() {
