@@ -1,0 +1,15 @@
+[package]
+name = "counter-client"
+version = "0.1.0"
+authors = ["ve"]
+
+[dependencies]
+clippy = {version = "0.0.172", optional = true}
+
+tokio-core = "0.1.10"
+tokio-io = "0.1.4"
+futures = "0.1.17"
+
+[features]
+default = []
+dev = ["clippy"]
