@@ -6,7 +6,6 @@ extern crate counter_server;
 
 extern crate tokio_proto;
 extern crate tokio_core;
-extern crate tokio_timer;
 extern crate tokio_io;
 extern crate tokio_service;
 
@@ -33,18 +32,18 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use std::net::SocketAddr;
 use std::process;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_proto::TcpServer;
 use tokio_proto::pipeline::ServerProto;
 use tokio_service::Service;
-use tokio_timer::Timer;
 
 
 pub enum Completion {
     Time(u64), // milliseconds
     OutOfTime,
+    Err(u8),
 }
 
 pub struct Request {
@@ -104,6 +103,7 @@ impl Encoder for TaskCodec {
         let msg = match res.completion {
             Completion::Time(t) => format!("Task {} completed in {} milliseconds", res.id, t),
             Completion::OutOfTime => format!("{} ran out of time", res.id),
+            Completion::Err(e) => format!("{} errored with:\n{}", res.id, e),
         };
 
         buf.extend(msg.as_bytes());
@@ -143,28 +143,26 @@ impl Service for CountingService {
     fn call(&self, req: Self::Request) -> Self::Future {
         let (id, difficulty) = (req.id, u64::from(req.difficulty));
 
-        let computation = self.thread_pool.spawn_fn(move || {
+        fn compute(difficulty: u64, timeout: u64) -> Completion {
             let now = Instant::now();
-
-            for _ in 0..difficulty {}
-
+            for _ in 0..difficulty {
+                let elapsed = now.elapsed();
+                if elapsed.as_secs() > timeout {
+                    return Completion::OutOfTime;
+                }
+            }
             let elapsed = now.elapsed();
-
             let millisec = (elapsed.as_secs() * 1_000) +
                 u64::from(elapsed.subsec_nanos() / 1_000_000);
-            let computation_time: Result<u64, ()> = Ok(millisec);
-            computation_time
+            Completion::Time(millisec)
+        }
+
+        let timeout = self.timeout;
+        let computation = self.thread_pool.spawn_fn(move || {
+            Ok(compute(difficulty, timeout))
         });
 
-        let timer = Timer::default();
-        let timed_computation = timer
-            .timeout(computation, Duration::from_secs(self.timeout))
-            .then(|result| match result {
-                Ok(t) => Ok(Completion::Time(t)),
-                _ => Ok(Completion::OutOfTime),
-            });
-
-        Box::new(timed_computation.map(move |completion| {
+        Box::new(computation.map(move |completion| {
             println!("Task {} completed", id);
             Response { id, completion }
         }))
