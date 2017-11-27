@@ -3,6 +3,7 @@ use bytes::BytesMut;
 use std::io;
 use tokio_io::codec::{Encoder, Decoder};
 
+#[derive(Debug)]
 pub enum Completion {
     Time(u64), // milliseconds
     OutOfTime,
