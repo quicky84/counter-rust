@@ -5,24 +5,25 @@
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate futures_cpupool;
 
 extern crate counter_client;
 extern crate rand;
 
 use counter_client::Config;
-use futures::Future;
+use futures::{Future, future};
+use futures_cpupool::CpuPool;
 use rand::{thread_rng, Rng};
 
 use std::env;
 use std::net::SocketAddr;
 use std::process;
 
-use std::thread;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
 use tokio_io::io;
 
-fn request(address: SocketAddr, rq: &str) {
+fn request(address: SocketAddr, rq: &str) -> String {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
@@ -42,7 +43,7 @@ fn request(address: SocketAddr, rq: &str) {
         });
 
     let (_socket, data) = core.run(task).unwrap();
-    println!("{}", String::from_utf8_lossy(&data));
+    String::from_utf8_lossy(&data).into_owned()
 }
 
 fn main() {
@@ -53,19 +54,24 @@ fn main() {
         process::exit(0);
     });
 
-    let mut rng = thread_rng();
-
     let mut tasks = vec![];
+    // set up a thread pool
+    let pool = CpuPool::new_num_cpus();
+
     for i in 0..config.n_tasks {
-        let d = rng.gen_range(config.min, config.max);
-        let rq = format!("{} {}\n", i + 1, d);
         let address = config.address;
+        let (min, max) = (config.min, config.max);
 
-        tasks.push(thread::spawn(move || { request(address, rq.as_str()); }));
+        let task = pool.spawn_fn(move || {
+            let mut rng = thread_rng();
+            let d = rng.gen_range(min, max);
+            let rq = format!("{} {}\n", i + 1, d);
+
+            let rs = request(address, rq.as_str());
+            Ok::<String, ()>(rs)
+        }).map(|rs| println!("{}", rs));
+        tasks.push(task);
     }
 
-    for task in tasks {
-        // Wait for the thread to finish. Returns a result.
-        let _ = task.join();
-    }
+    let _ = future::join_all(tasks).wait();
 }
