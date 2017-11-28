@@ -23,7 +23,9 @@ impl Config {
     ///     args[4] - maximum value
     pub fn new(args: &[String]) -> Result<Config, &'static str> {
         if args.len() < 5 {
-            return Err("Not enough arguments: ip_address n_tasks min_value max_value");
+            return Err(
+                "Not enough arguments: ip_address n_tasks min_value max_value",
+            );
         }
 
         let address: SocketAddr = match args[1].parse() {
